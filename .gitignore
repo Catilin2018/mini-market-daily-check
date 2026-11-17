@@ -1,0 +1,6 @@
+# Never commit staff data, migration secrets, or local scratch files
+legacy-data.json
+migrate-data.mjs
+*.local
+.DS_Store
+node_modules/
