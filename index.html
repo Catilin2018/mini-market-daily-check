@@ -113,6 +113,23 @@ header{background:linear-gradient(135deg,var(--brand-deep),var(--brand));color:#
 .sig .field{flex:1;min-width:140px}
 .sig .field input{width:100%}
 
+/* zone map */
+.mapbtn{border:1px solid var(--brand);background:var(--brand-soft);color:var(--brand-deep);border-radius:9px;padding:7px 12px;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.mapbtn:hover{background:#d3eee5}
+.modal.map{display:none;max-width:min(94vw,960px);width:960px;padding:16px;max-height:92vh;overflow:auto}
+.modal.map.show{display:block}
+.map-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.map-hd h3{margin:0;font-size:16px}
+.map-close{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:5px 11px;font-weight:700;color:var(--ink-2)}
+.map-stage{position:relative;width:100%;line-height:0}
+.map-stage img{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:8px;background:#fff}
+.zonehit{position:absolute;transform:translate(-50%,-50%);width:8.5%;height:5.6%;border:2px solid transparent;border-radius:7px;cursor:pointer;background:rgba(13,122,95,.12);transition:.12s;line-height:1}
+.zonehit:hover,.zonehit.on{border-color:var(--brand);background:rgba(13,122,95,.34)}
+.zonehit b{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:9px;color:var(--brand-deep);font-weight:800;white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff}
+.maptip{font-size:12px;color:var(--ink-2);margin:10px 0 0;line-height:1.6}
+tr.zoom-flash{animation:zf 1.6s ease}
+@keyframes zf{0%,100%{background:transparent}15%,60%{background:#fff2c4}}
+
 /* overview */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;padding:14px 17px}
 .stat{border:1px solid var(--line);border-radius:11px;padding:12px;background:var(--surface-2)}
@@ -245,6 +262,16 @@ header{background:linear-gradient(135deg,var(--brand-deep),var(--brand));color:#
       <button class="btn ghost" id="expCancel">Cancel / 取消</button>
       <button class="btn pri" id="expGo">Download / 下载</button>
     </div>
+  </div>
+</div>
+
+<div class="mask" id="mapMask">
+  <div class="modal map">
+    <div class="map-hd"><h3>Store zone map / 店铺区域地图</h3><button class="map-close" id="mapClose">✕ Close / 关闭</button></div>
+    <div class="map-stage" id="mapStage">
+      <img src="zone-map.png" alt="Store zone map / 店铺区域图">
+    </div>
+    <p class="maptip">Tap a zone to jump to its checklist row / 点击图中的区域可跳到对应的检查行：B1–B15 货架区 · Fre 1–2 冷冻柜 · Fri 1–2 冰箱. <b>Till</b> 收银台不在检查范围内。</p>
   </div>
 </div>
 
@@ -414,7 +441,7 @@ function renderEntry(){
   h+='</section>';
 
   /* Section 2 */
-  h+='<section class="card"><div class="card-hd"><div><h2>2 · Stock &amp; Shelf Inspection</h2><div class="sub">超市商品与货架检查 — 19 areas / 19 个区域</div></div><span class="badge" id="zoneBadge"></span></div>';
+  h+='<section class="card"><div class="card-hd"><div><h2>2 · Stock &amp; Shelf Inspection</h2><div class="sub">超市商品与货架检查 — 19 areas / 19 个区域</div></div><span class="badge" id="zoneBadge"></span><button class="mapbtn" id="openMapBtn" type="button">🗺️ Map / 区域图</button></div>';
   h+='<div class="metarow"><div class="field"><label>Date / 日期</label><input value="'+esc(d.date)+'" readonly style="background:#eef1f3"></div>'
     +'<div class="field grow"><label>Detailed check by / 详细检查人</label><input data-path="meta.detailChecker" value="'+esc(d.meta.detailChecker)+'" placeholder="Name / 姓名"></div>'
     +'<div class="field grow"><label>18:00 quick check by / 18:00检查人</label><input data-path="meta.quickChecker" value="'+esc(d.meta.quickChecker)+'" placeholder="Name / 姓名"></div></div>';
@@ -680,6 +707,54 @@ function buildExcel(rows,scope,from,to){
   const suffix=scope==='all'?'ALL':scope==='day'?from:(from+'_to_'+to);
   XLSX.writeFile(wb,'MiniMarket_Check_'+suffix+'.xlsx');
 }
+
+
+/* ================= zone map ================= */
+const ZONE_COORDS={    'B7':[10,7],
+    'B8':[28,7],
+    'B9':[46,7],
+    'B10':[64,7],
+    'B11':[81,7],
+    'B6':[6,17],
+    'B12':[45,18],
+    'B13':[45,24],
+    'B5':[18,39],
+    'B4':[29,43],
+    'B3':[29,53],
+    'B2':[29,65],
+    'B1':[29,79],
+    'B14':[56,54],
+    'B15':[62,54],
+    'Fre 1':[79,25],
+    'Fri 1':[79,46],
+    'Fri 2':[79,66],
+    'Fre 2':[41,90]};
+function openMap(){
+  const stage=document.getElementById('mapStage');
+  if(!stage.querySelector('.zonehit')){
+    Object.keys(ZONE_COORDS).forEach(z=>{
+      const [x,y]=ZONE_COORDS[z];
+      const b=document.createElement('div');
+      b.className='zonehit';b.style.left=x+'%';b.style.top=y+'%';
+      b.dataset.zone=z;b.innerHTML='<b>'+z+'</b>';
+      b.onclick=()=>jumpToZone(z);
+      stage.appendChild(b);
+    });
+  }
+  document.getElementById('mapMask').classList.add('show');
+}
+function jumpToZone(z){
+  document.getElementById('mapMask').classList.remove('show');
+  const row=[...document.querySelectorAll('#paneEntry .ztable tr')].find(r=>r.querySelector('.zone-code')&&r.querySelector('.zone-code').textContent.trim()===z);
+  if(!row){toast('Zone not found / 未找到该区域',true);return;}
+  row.scrollIntoView({behavior:'smooth',block:'center'});
+  row.classList.remove('zoom-flash');void row.offsetWidth;row.classList.add('zoom-flash');
+  setTimeout(()=>row.classList.remove('zoom-flash'),1700);
+}
+document.addEventListener('click',e=>{
+  if(e.target.closest('#openMapBtn')) openMap();
+  if(e.target.id==='mapClose'||e.target.id==='mapMask') document.getElementById('mapMask').classList.remove('show');
+});
 
 /* init */
 document.getElementById('datePick').value=TODAY;
