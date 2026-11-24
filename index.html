@@ -200,7 +200,7 @@ tr.zoom-flash{animation:zf 1.6s ease}
       <div class="logo">🛒</div>
       <div>
         <h1>Orient Mini Market · Daily Check</h1>
-        <p>Work time · Stock &amp; shelf inspection / 工作时间与货架检查</p>
+        <p>Work time · Shelf inspection · Warehouse / 工作时间 · 货架检查 · 仓库</p>
       </div>
     </div>
     <div class="head-actions">
@@ -224,11 +224,13 @@ tr.zoom-flash{animation:zf 1.6s ease}
 <div class="tabs">
   <button class="tab active" data-tab="entry">✍️ Staff entry / 员工填写</button>
   <button class="tab" data-tab="overview">📊 Overview / 查看</button>
+  <button class="tab" data-tab="warehouse">📦 Warehouse / 仓库</button>
   <button class="tab" data-tab="history">🗓️ History / 历史</button>
 </div>
 
 <div class="wrap">
   <div id="paneEntry"></div>
+  <div id="paneWarehouse" style="display:none"></div>
   <div id="paneOverview" style="display:none"></div>
   <div id="paneHistory" style="display:none"></div>
 </div>
@@ -315,6 +317,26 @@ const DUTIES = [
 ];
 const ZONES = [...Array.from({length:15},(_,i)=>'B'+(i+1)),'Fre 1','Fre 2','Fri 1','Fri 2'];
 
+/* ================= warehouse record (Asia Market warehouse work form) ================= */
+const WH_SLOTS = [
+ {time:'11:30–12:30', name:'Goods Receiving', zh:'收货', tasks:[
+   {id:'w1',en:'Receive goods',zh:'收货'},
+   {id:'w2',en:'Picking and sorting',zh:'整理分类'},
+   {id:'w3',en:'Rotate old stock to front',zh:'旧货归位'}]},
+ {time:'12:30–15:00', name:'Organise Shelves', zh:'整理货架', tasks:[
+   {id:'w4',en:'Dry store',zh:'干货区'},
+   {id:'w5',en:'Noodles',zh:'粉面区'},
+   {id:'w6',en:'Snacks',zh:'零食区'},
+   {id:'w7',en:'Chilled/Frozen stock',zh:'冷藏/冻货区'}]},
+ {time:'15:00–15:30', name:'Break (Unpaid)', zh:'休息（无薪）', break:true, tasks:[]},
+ {time:'15:30–17:00', name:'Inventory', zh:'库存', tasks:[
+   {id:'w8',en:'Stock Take',zh:'清点库存'},
+   {id:'w9',en:'Tidy Front Shop Shelves',zh:'整理前台货架'}]},
+ {time:'17:00–17:30', name:'Manager Check & Confirm', zh:'经理检查确认', tasks:[
+   {id:'w10',en:'Manager Check & Confirm',zh:'经理检查确认'}]}
+];
+const WH_TASKS = WH_SLOTS.reduce((a,s)=>a.concat(s.tasks||[]),[]);
+
 /* ================= cloud client (Supabase) ================= */
 let cloud;
 try{
@@ -339,7 +361,12 @@ function emptyData(date){
   const duties={}, zones={};
   DUTIES.forEach(d=>duties[d.id]={done:false,notes:''});
   ZONES.forEach(z=>zones[z]={detail:false,quick:false,issues:'',action:'',initials:''});
-  return {date, meta:{employee:'',manager:'',workingHours:'',bottomShelf:'',handover:'',detailChecker:'',quickChecker:'',empSig:'',mgrSig:''},duties,zones,activity:[],updatedAt:null,updatedBy:''};
+  const whTasks={};
+  WH_TASKS.forEach(t=>whTasks[t.id]={done:false,notes:''});
+  return {date, meta:{employee:'',manager:'',workingHours:'',bottomShelf:'',handover:'',detailChecker:'',quickChecker:'',empSig:'',mgrSig:''},
+    duties,zones,
+    warehouse:{active:false,delivery:{time:'',receivedBy:'',quantity:'',noteNo:'',total:''},tasks:whTasks,empSig:'',mgrSig:''},
+    activity:[],updatedAt:null,updatedBy:''};
 }
 function setSave(kind,text){
   const el=document.getElementById('saveState'); if(!el)return;
@@ -363,6 +390,11 @@ async function loadDate(date){
       state.data.duties=Object.assign(emptyData(date).duties, data.data.duties||{});
       state.data.zones=Object.assign(emptyData(date).zones, data.data.zones||{});
       state.data.meta=Object.assign(emptyData(date).meta, data.data.meta||{});
+      const base=emptyData(date), oldw=data.data.warehouse||{};
+      const w=Object.assign(base.warehouse, oldw);
+      w.delivery=Object.assign(base.warehouse.delivery, oldw.delivery||{});
+      w.tasks=Object.assign(base.warehouse.tasks, oldw.tasks||{});
+      state.data.warehouse=w;
     }else{
       state.data = emptyData(date);
     }
@@ -419,7 +451,7 @@ async function flush(){
 
 /* ================= rendering ================= */
 function render(){
-  renderEntry();renderOverview();renderHistory();
+  renderEntry();renderWarehouseEntry();renderOverview();renderHistory();
 }
 function renderEntry(){
   const d=state.data; if(!d)return;
@@ -470,6 +502,44 @@ function renderEntry(){
   document.getElementById('paneEntry').innerHTML=h;
   updateBadges();
 }
+function hasWarehouse(d){
+  const w=d&&d.warehouse; if(!w)return false;
+  if(w.active)return true;
+  const dl=w.delivery||{};
+  if(['time','receivedBy','quantity','noteNo','total'].some(k=>String(dl[k]||'').trim()))return true;
+  const ts=w.tasks||{};
+  if(WH_TASKS.some(t=>ts[t.id]&&(ts[t.id].done||String(ts[t.id].notes||'').trim())))return true;
+  if(String(w.empSig||'').trim()||String(w.mgrSig||'').trim())return true;
+  return false;
+}
+function renderWarehouseEntry(){
+  const d=state.data,p=document.getElementById('paneWarehouse'); if(!d||!p)return;
+  const w=d.warehouse||{}, dl=w.delivery||{}, ts=w.tasks||{};
+  let h='<section class="card"><div class="card-hd"><div><h2>3 · Warehouse work record / 仓库工作记录</h2><div class="sub">Asia Market warehouse — typically 3× per week / 通常每周三次</div></div><span class="badge neutral" id="whBadge"></span></div>';
+  h+='<div class="metarow">'
+    +'<div class="field"><label>Delivery time / 到货时间</label><input data-path="warehouse.delivery.time" value="'+esc(dl.time)+'" placeholder="e.g. 11:30"></div>'
+    +'<div class="field"><label>Received by / 收货人</label><input data-path="warehouse.delivery.receivedBy" value="'+esc(dl.receivedBy)+'" placeholder="Name / 姓名"></div>'
+    +'<div class="field"><label>Quantity received / 收货数量</label><input data-path="warehouse.delivery.quantity" value="'+esc(dl.quantity)+'" placeholder="Qty / 数量"></div>'
+    +'<div class="field"><label>Delivery note no. / 收货单号</label><input data-path="warehouse.delivery.noteNo" value="'+esc(dl.noteNo)+'" placeholder="Note no. / 单号"></div>'
+    +'<div class="field"><label>Shipment total / 本批货总价 ($)</label><input type="number" step="0.01" min="0" data-path="warehouse.delivery.total" value="'+esc(dl.total)+'" placeholder="0.00"></div>'
+    +'</div>';
+  WH_SLOTS.forEach(slot=>{
+    h+='<div class="row" style="background:var(--surface-2)"><div class="row-main"><span class="time">'+esc(slot.time)+'</span><div class="area">'+esc(slot.name)+' <span class="zh">/ '+esc(slot.zh)+'</span></div></div></div>';
+    if(slot.break){h+='<div class="row"><div class="row-main"><div class="task">Break (Unpaid) / 休息（无薪） — no task / 无需填写</div></div></div>';return;}
+    slot.tasks.forEach(t=>{
+      const v=ts[t.id]||{done:false,notes:''};
+      h+='<div class="row '+(v.done?'done':'')+'"><div class="row-main"><div class="area">'+esc(t.en)+' <span class="zh">/ '+esc(t.zh)+'</span></div>'
+        +'<div class="note-wrap"><input class="note" data-path="warehouse.tasks.'+t.id+'.notes" placeholder="Notes / 备注 (optional)" value="'+esc(v.notes)+'"></div></div>'
+        +'<div class="row-side"><button class="check '+(v.done?'on':'')+'" data-check="warehouse.tasks.'+t.id+'.done"><b>'+(v.done?'✓':'')+'</b><small>DONE</small></button><span class="lbl">完成</span></div></div>';
+    });
+  });
+  h+='<div class="sig"><div class="field"><label>Employee signature / 员工签字</label><input data-path="warehouse.empSig" value="'+esc(w.empSig)+'" placeholder="Name / 姓名"></div>'
+    +'<div class="field"><label>Manager signature / 经理签字</label><input data-path="warehouse.mgrSig" value="'+esc(w.mgrSig)+'" placeholder="Name / 姓名"></div></div>';
+  h+='</section>';
+  p.innerHTML=h;
+  const wb=document.getElementById('whBadge');
+  if(wb)wb.textContent=WH_TASKS.filter(t=>ts[t.id]&&ts[t.id].done).length+' / '+WH_TASKS.length+' done';
+}
 function updateBadges(){
   const d=state.data; if(!d)return;
   const dn=DUTIES.filter(x=>d.duties[x.id]&&d.duties[x.id].done).length;
@@ -512,18 +582,46 @@ function renderOverview(){
    +'<div class="ov-item"><b>Bottom-shelf cleaning / 底层清洁：</b> '+esc(d.meta.bottomShelf==='yes'?'Yes 是':d.meta.bottomShelf==='no'?'No 否':'—')+'</div>'
    +'<div class="ov-item"><b>Issues handed over / 问题已交接：</b> '+esc(d.meta.handover==='yes'?'Yes 是':d.meta.handover==='no'?'No 否':'—')+'</div>'
    +'</div></section>';
+  if(hasWarehouse(d)){
+    const w=d.warehouse||{},dl=w.delivery||{},ts=w.tasks||{};
+    const wdn=WH_TASKS.filter(t=>ts[t.id]&&ts[t.id].done).length;
+    h+='<section class="card"><div class="card-hd"><div><h2>Warehouse record / 仓库记录</h2><div class="sub">This day / 当日 — read-only / 只读</div></div><span class="badge neutral">'+wdn+' / '+WH_TASKS.length+'</span></div>';
+    h+='<div class="ov-grid">'
+      +'<div class="ov-item"><b>Delivery time / 到货时间：</b> '+esc(dl.time||'—')+'</div>'
+      +'<div class="ov-item"><b>Received by / 收货人：</b> '+esc(dl.receivedBy||'—')+'</div>'
+      +'<div class="ov-item"><b>Quantity / 收货数量：</b> '+esc(dl.quantity||'—')+'</div>'
+      +'<div class="ov-item"><b>Delivery note / 收货单号：</b> '+esc(dl.noteNo||'—')+'</div>'
+      +'<div class="ov-item"><b>Shipment total / 本批货总价：</b> $'+esc(dl.total||'—')+'</div>'
+      +'<div class="ov-item"><b>Employee / 员工签字：</b> '+esc(w.empSig||'—')+'</div>'
+      +'<div class="ov-item"><b>Manager / 经理签字：</b> '+esc(w.mgrSig||'—')+'</div></div>';
+    h+='<div class="ov-grid">';
+    WH_TASKS.forEach(t=>{const v=ts[t.id]||{};h+='<div class="ov-item"><span class="tick '+(v.done?'':'miss')+'">'+(v.done?'✓':'○')+'</span><div><b>'+esc(t.en)+'</b> <span class="zh">/ '+esc(t.zh)+'</span>'+(v.notes?'<div style="color:var(--ink-2);font-size:12px">📝 '+esc(v.notes)+'</div>':'')+'</div></div>';});
+    h+='</div></section>';
+  }
   h+='<div class="readonly-note">👁️ This view is read-only. To make changes, open the Staff entry tab. / 此视图只读。如需修改，请打开“员工填写”页。</div>';
   p.innerHTML=h;
 }
 let historyRows=[];
 async function renderHistory(){
   const p=document.getElementById('paneHistory');
-  p.innerHTML='<section class="card"><div class="card-hd"><div><h2>Record history / 历史记录</h2><div class="sub">Tap a date to view / 点击日期查看</div></div><button class="btn" id="histRefresh" style="padding:6px 10px;font-size:12px">↻ Refresh</button></div><div class="hist" id="histBody"><div class="empty">Loading… / 载入中</div></div></section>';
+  p.innerHTML='<section class="card"><div class="card-hd"><div><h2>Record history / 历史记录</h2><div class="sub">Tap a date to view / 点击日期查看</div></div><button class="btn" id="histRefresh" style="padding:6px 10px;font-size:12px">↻ Refresh</button></div><div class="hist" id="histBody"><div class="empty">Loading… / 载入中</div></div></section>'
+    +'<section class="card"><div class="card-hd"><div><h2>Warehouse history / 仓库记录</h2><div class="sub">Only days with a warehouse check / 仅显示有仓库检查的日期</div></div><span class="badge neutral" id="whHistBadge"></span></div><div class="hist" id="whHistBody"><div class="empty">Loading… / 载入中</div></div></section>';
   document.getElementById('histRefresh').onclick=()=>{renderHistory();};
   try{
     const {data,error}=await cloud.database.from('daily_reports').select('report_date,data,updated_at').order('report_date',{ascending:false}).limit(120);
     if(error)throw error;
     historyRows=data||[];
+    const whBody=document.getElementById('whHistBody');
+    const whRows=(data||[]).filter(r=>hasWarehouse(r.data||{}));
+    const whBadge=document.getElementById('whHistBadge'); if(whBadge)whBadge.textContent=whRows.length;
+    if(whBody){
+      if(!whRows.length)whBody.innerHTML='<div class="empty">No warehouse checks yet / 暂无仓库检查记录</div>';
+      else whBody.innerHTML=whRows.map(r=>{
+        const w=(r.data||{}).warehouse||{},dl=w.delivery||{},ts=w.tasks||{};
+        const wdn=WH_TASKS.filter(t=>ts[t.id]&&ts[t.id].done).length;
+        return '<div class="hrow" data-date="'+esc(r.report_date)+'"><div class="hdate">'+esc(r.report_date)+'</div><div style="flex:1;font-size:12.5px;color:var(--ink-2)">Total / 总价：$'+esc(dl.total||'—')+' · '+wdn+'/'+WH_TASKS.length+' tasks</div><span style="color:var(--ink-3);font-size:12px">›</span></div>';
+      }).join('');
+    }
     const body=document.getElementById('histBody');
     if(!historyRows.length){body.innerHTML='<div class="empty">No records yet. Fill in today\'s checklist to start. / 暂无记录，先填写今天的检查表吧。</div>';return;}
     body.innerHTML=historyRows.map(r=>{
@@ -539,6 +637,10 @@ async function renderHistory(){
       document.getElementById('datePick').value=el.dataset.date;
       loadDate(el.dataset.date); switchTab('overview'); window.scrollTo({top:0,behavior:'smooth'});
     });
+    if(whBody)whBody.querySelectorAll('.hrow').forEach(el=>el.onclick=()=>{
+      document.getElementById('datePick').value=el.dataset.date;
+      loadDate(el.dataset.date); switchTab('warehouse'); window.scrollTo({top:0,behavior:'smooth'});
+    });
   }catch(e){const b=document.getElementById('histBody');if(b)b.innerHTML='<div class="empty">Could not load history / 无法载入历史记录</div>';}
 }
 
@@ -549,7 +651,9 @@ function switchTab(tab){
   document.getElementById('paneEntry').style.display=tab==='entry'?'':'none';
   document.getElementById('paneOverview').style.display=tab==='overview'?'':'none';
   document.getElementById('paneHistory').style.display=tab==='history'?'':'none';
+  document.getElementById('paneWarehouse').style.display=tab==='warehouse'?'':'none';
   if(tab==='entry')renderEntry();
+  if(tab==='warehouse')renderWarehouseEntry();
   if(tab==='overview')renderOverview();
   if(tab==='history')renderHistory();
 }
@@ -662,15 +766,15 @@ function buildExcel(rows,scope,from,to){
   const sum=[['Date 日期','Completion % 完成率','Employee 员工','Manager 经理','Working hours 工作时间',
     'Detailed checker 详细检查人','18:00 checker 18:00检查人','Bottom-shelf cleaning 底层清洁',
     'Issues handed over 问题已交接','Issues recorded 问题数','Employee signature 员工签字',
-    'Manager signature 经理签字','Last updated 最后更新','Updated by 更新人']];
+    'Manager signature 经理签字','Warehouse total ($) 仓库总价','Last updated 最后更新','Updated by 更新人']];
   rows.forEach(r=>{const d=r.data||{};
     const issues=ZONES.filter(z=>d.zones&&d.zones[z]&&(d.zones[z].issues||'').trim()).length;
     sum.push([ds(r.report_date),pct(d)+'%',meta(d,'employee'),meta(d,'manager'),meta(d,'workingHours'),
       meta(d,'detailChecker'),meta(d,'quickChecker'),yes(d,'bottomShelf'),yes(d,'handover'),issues,
-      meta(d,'empSig'),meta(d,'mgrSig'),d.updatedAt?new Date(d.updatedAt).toLocaleString():'',d.updatedBy||'']);
+      meta(d,'empSig'),meta(d,'mgrSig'),(d.warehouse&&d.warehouse.delivery&&d.warehouse.delivery.total)||'',d.updatedAt?new Date(d.updatedAt).toLocaleString():'',d.updatedBy||'']);
   });
   const wsSum=XLSX.utils.aoa_to_sheet(sum);
-  wsSum['!cols']=[{wch:13},{wch:13},{wch:16},{wch:16},{wch:16},{wch:20},{wch:20},{wch:20},{wch:20},{wch:15},{wch:18},{wch:18},{wch:22},{wch:16}];
+  wsSum['!cols']=[{wch:13},{wch:13},{wch:16},{wch:16},{wch:16},{wch:20},{wch:20},{wch:20},{wch:20},{wch:15},{wch:18},{wch:18},{wch:20},{wch:22},{wch:16}];
   XLSX.utils.book_append_sheet(wb,wsSum,'Summary 总览');
 
   /* Sheet 2: Work time & duties — one row per duty per day */
@@ -694,7 +798,31 @@ function buildExcel(rows,scope,from,to){
   wsSp['!cols']=[{wch:13},{wch:11},{wch:16},{wch:17},{wch:46},{wch:46},{wch:18}];
   XLSX.utils.book_append_sheet(wb,wsSp,'Shelf Check 货架检查');
 
-  /* Sheet 4: Activity log */
+  /* Warehouse: one summary row per day that has a warehouse check */
+  const wh=[['Date 日期','Delivery time 到货时间','Received by 收货人','Quantity 收货数量','Delivery note 收货单号',
+    'Shipment total ($) 本批货总价','Tasks done 任务完成','Employee signature 员工签字','Manager signature 经理签字']];
+  rows.forEach(r=>{const d=r.data||{};if(!hasWarehouse(d))return;
+    const w=d.warehouse||{},dl=w.delivery||{},ts=w.tasks||{};
+    wh.push([ds(r.report_date),dl.time||'',dl.receivedBy||'',dl.quantity||'',dl.noteNo||'',dl.total||'',
+      WH_TASKS.filter(t=>ts[t.id]&&ts[t.id].done).length+'/'+WH_TASKS.length,w.empSig||'',w.mgrSig||'']);
+  });
+  const wsWh=XLSX.utils.aoa_to_sheet(wh);
+  wsWh['!cols']=[{wch:13},{wch:16},{wch:18},{wch:16},{wch:18},{wch:20},{wch:16},{wch:20},{wch:20}];
+  XLSX.utils.book_append_sheet(wb,wsWh,'Warehouse 仓库记录');
+
+  /* Warehouse tasks: one row per task per warehouse day */
+  const wtk=[['Date 日期','Time 时间','Section 时段','Task 任务','任务(中)','Done 完成','Notes 备注']];
+  rows.forEach(r=>{const d=r.data||{};if(!hasWarehouse(d))return;
+    const w=d.warehouse||{},ts=w.tasks||{};
+    WH_SLOTS.forEach(s=>{if(s.break)return;
+      s.tasks.forEach(t=>{const v=ts[t.id]||{};wtk.push([ds(r.report_date),s.time,s.name+' / '+s.zh,t.en,t.zh,v.done?'Yes ✓':'No ✘',v.notes||'']);});
+    });
+  });
+  const wsWtk=XLSX.utils.aoa_to_sheet(wtk);
+  wsWtk['!cols']=[{wch:13},{wch:15},{wch:32},{wch:32},{wch:20},{wch:11},{wch:34}];
+  XLSX.utils.book_append_sheet(wb,wsWtk,'Warehouse tasks 仓库任务');
+
+  /* Sheet: Activity log */
   const ac=[['Date 日期','By 操作人','When 时间','Action 操作']];
   rows.forEach(r=>{const d=r.data||{},list=Array.isArray(d.activity)?d.activity:[];
     list.forEach(a=>ac.push([ds(r.report_date),a.by||'',a.at?new Date(a.at).toLocaleString():'',a.action||'']));
